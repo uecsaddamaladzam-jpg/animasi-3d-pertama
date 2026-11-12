@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stickman 3D Survival</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05070f; font-family: system-ui, sans-serif; }
+  canvas { display: block; touch-action: none; }
+  #hint { position: fixed; left: 0; right: 0; bottom: 14px; text-align: center; color: #cfd8ff; font-size: 13px; opacity: .75; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="hint">Geser untuk memutar kamera • Cubit / scroll untuk zoom</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- Renderer, scene, camera ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070b1c);
+scene.fog = new THREE.FogExp2(0x070b1c, 0.035);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
+
+// ---------- Lights ----------
+scene.add(new THREE.HemisphereLight(0x5a6bb5, 0x1a1408, 0.45));
+
+const moon = new THREE.DirectionalLight(0x9fb4ff, 0.6);
+moon.position.set(-15, 25, -10);
+moon.castShadow = true;
+moon.shadow.mapSize.set(2048, 2048);
+Object.assign(moon.shadow.camera, { left: -20, right: 20, top: 20, bottom: -20, near: 1, far: 80 });
+scene.add(moon);
+
+const fireLight = new THREE.PointLight(0xff8a2b, 40, 22, 1.6);
+fireLight.position.set(0, 1.2, 0);
+fireLight.castShadow = true;
+scene.add(fireLight);
+
+// ---------- Ground ----------
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(60, 64),
+  new THREE.MeshStandardMaterial({ color: 0x1f3322, roughness: 1 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ---------- Stars + Moon ----------
+{
+  const n = 1200, pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const r = 90, u = Math.random() * Math.PI * 2, v = Math.random() * 0.48 * Math.PI;
+    pos[i*3]   = r * Math.cos(u) * Math.sin(v + 0.1);
+    pos[i*3+1] = r * Math.cos(v) * 0.9 + 5;
+    pos[i*3+2] = r * Math.sin(u) * Math.sin(v + 0.1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 0.35, fog: false, sizeAttenuation: true })));
+
+  const moonMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(4, 32, 32),
+    new THREE.MeshBasicMaterial({ color: 0xeaf0ff, fog: false })
+  );
+  moonMesh.position.set(-50, 45, -60);
+  scene.add(moonMesh);
+}
+
+// ---------- Trees ----------
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3322, roughness: 1 });
+const leafMat  = new THREE.MeshStandardMaterial({ color: 0x1c4a2a, roughness: 0.9 });
+function makeTree(x, z, s) {
+  const t = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.28, 1.6, 8), trunkMat);
+  trunk.position.y = 0.8; trunk.castShadow = true;
+  t.add(trunk);
+  for (let i = 0; i < 3; i++) {
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.5 - i * 0.35, 1.8, 8), leafMat);
+    cone.position.y = 2 + i * 1.0; cone.castShadow = true;
+    t.add(cone);
+  }
+  t.position.set(x, 0, z);
+  t.scale.setScalar(s);
+  t.rotation.y = Math.random() * 6;
+  scene.add(t);
+}
+for (let i = 0; i < 70; i++) {
+  const a = Math.random() * Math.PI * 2;
+  const r = 9 + Math.random() * 35;
+  makeTree(Math.cos(a) * r, Math.sin(a) * r, 0.8 + Math.random() * 1.1);
+}
+
+// ---------- Rocks ----------
+const rockMat = new THREE.MeshStandardMaterial({ color: 0x555a63, roughness: 1, flatShading: true });
+for (let i = 0; i < 14; i++) {
+  const a = Math.random() * Math.PI * 2, r = 2 + Math.random() * 7;
+  const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2 + Math.random() * 0.35, 0), rockMat);
+  rock.position.set(Math.cos(a) * r, 0.1, Math.sin(a) * r);
+  rock.rotation.set(Math.random() * 3, Math.random() * 3, 0);
+  rock.castShadow = rock.receiveShadow = true;
+  scene.add(rock);
+}
+
+// ---------- Campfire ----------
+const fire = new THREE.Group();
+scene.add(fire);
+for (let i = 0; i < 6; i++) {
+  const log = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1.0, 8), trunkMat);
+  const a = (i / 6) * Math.PI * 2;
+  log.position.set(Math.cos(a) * 0.3, 0.2, Math.sin(a) * 0.3);
+  log.rotation.z = Math.PI / 2.6;
+  log.rotation.y = -a;
+  log.castShadow = true;
+  fire.add(log);
+}
+const FN = 260;
+const fPos = new Float32Array(FN * 3), fLife = new Float32Array(FN), fVel = new Float32Array(FN * 3);
+function resetParticle(i, initial) {
+  const a = Math.random() * Math.PI * 2, r = Math.random() * 0.3;
+  fPos[i*3] = Math.cos(a) * r; fPos[i*3+1] = 0.25; fPos[i*3+2] = Math.sin(a) * r;
+  fVel[i*3] = (Math.random() - 0.5) * 0.25;
+  fVel[i*3+1] = 0.8 + Math.random() * 1.2;
+  fVel[i*3+2] = (Math.random() - 0.5) * 0.25;
+  fLife[i] = initial ? Math.random() : 1;
+}
+for (let i = 0; i < FN; i++) resetParticle(i, true);
+const fGeo = new THREE.BufferGeometry();
+fGeo.setAttribute('position', new THREE.BufferAttribute(fPos, 3));
+const fMat = new THREE.PointsMaterial({
+  color: 0xff7a1a, size: 0.32, transparent: true, opacity: 0.85,
+  blending: THREE.AdditiveBlending, depthWrite: false
+});
+fire.add(new THREE.Points(fGeo, fMat));
+
+// ---------- Stickman ----------
+const stickMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5, emissive: 0x222222 });
+function limb(len, radius = 0.06) {
+  const pivot = new THREE.Group();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, len, 10), stickMat);
+  m.position.y = -len / 2; m.castShadow = true;
+  pivot.add(m);
+  return pivot;
+}
+function makeStickman() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.8, 10), stickMat);
+  body.position.y = 1.2; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 24), stickMat);
+  head.position.y = 1.85; head.castShadow = true; g.add(head);
+  const armL = limb(0.75), armR = limb(0.75), legL = limb(0.85), legR = limb(0.85);
+  armL.position.set(-0.05, 1.55, 0.0); armR.position.set(0.05, 1.55, 0.0);
+  legL.position.set(-0.05, 0.8, 0); legR.position.set(0.05, 0.8, 0);
+  g.add(armL, armR, legL, legR);
+  g.userData = { armL, armR, legL, legR };
+  return g;
+}
+const hero = makeStickman();
+scene.add(hero);
+
+// Teman duduk (diam, melambai)
+const buddy = makeStickman();
+buddy.position.set(2.2, 0, 0.6);
+buddy.rotation.y = -Math.PI / 1.7;
+scene.add(buddy);
+
+// ---------- Camera orbit (drag + zoom) ----------
+let camYaw = 0.6, camPitch = 0.35, camDist = 9, autoRotate = true;
+const pts = new Map();
+let pinch = 0;
+const el = renderer.domElement;
+el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); pts.set(e.pointerId, e); autoRotate = false; });
+el.addEventListener('pointerup',   e => { pts.delete(e.pointerId); pinch = 0; });
+el.addEventListener('pointercancel', e => { pts.delete(e.pointerId); pinch = 0; });
+el.addEventListener('pointermove', e => {
+  if (!pts.has(e.pointerId)) return;
+  const prev = pts.get(e.pointerId);
+  if (pts.size === 1) {
+    camYaw   -= (e.clientX - prev.clientX) * 0.006;
+    camPitch += (e.clientY - prev.clientY) * 0.006;
+    camPitch = Math.max(0.05, Math.min(1.3, camPitch));
+  }
+  pts.set(e.pointerId, e);
+  if (pts.size === 2) {
+    const [a, b] = [...pts.values()];
+    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (pinch) camDist = Math.max(4, Math.min(22, camDist - (d - pinch) * 0.03));
+    pinch = d;
+  }
+});
+el.addEventListener('wheel', e => {
+  camDist = Math.max(4, Math.min(22, camDist + e.deltaY * 0.01));
+}, { passive: true });
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---------- Animation loop ----------
+const clock = new THREE.Clock();
+function animate() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  // Hero berjalan mengelilingi api unggun
+  const R = 4.2, ang = t * 0.45;
+  hero.position.set(Math.cos(ang) * R, 0, Math.sin(ang) * R);
+  hero.rotation.y = -ang;               // menghadap arah gerak
+  const u = hero.userData, sw = Math.sin(t * 5.5) * 0.7;
+  u.legL.rotation.x =  sw; u.legR.rotation.x = -sw;
+  u.armL.rotation.x = -sw * 0.8; u.armR.rotation.x = sw * 0.8;
+  hero.position.y = Math.abs(Math.sin(t * 5.5)) * 0.06;
+
+  // Teman melambai
+  const b = buddy.userData;
+  b.armR.rotation.z = -2.5 + Math.sin(t * 6) * 0.35;
+  b.armL.rotation.x = 0.2;
+  b.legL.rotation.x = -1.4; b.legR.rotation.x = -1.4;
+  buddy.position.y = 0.45;
+
+  // Api
+  const arr = fGeo.attributes.position.array;
+  for (let i = 0; i < FN; i++) {
+    fLife[i] -= dt * (0.7 + (i % 5) * 0.12);
+    if (fLife[i] <= 0) resetParticle(i, false);
+    arr[i*3]   += fVel[i*3]   * dt + Math.sin(t * 3 + i) * 0.002;
+    arr[i*3+1] += fVel[i*3+1] * dt;
+    arr[i*3+2] += fVel[i*3+2] * dt;
+  }
+  fGeo.attributes.position.needsUpdate = true;
+  fMat.opacity = 0.7 + Math.sin(t * 20) * 0.1;
+  fireLight.intensity = 36 + Math.sin(t * 18) * 5 + Math.sin(t * 31) * 3;
+
+  // Kamera
+  if (autoRotate) camYaw += dt * 0.12;
+  camera.position.set(
+    Math.sin(camYaw) * Math.cos(camPitch) * camDist,
+    Math.sin(camPitch) * camDist + 1,
+    Math.cos(camYaw) * Math.cos(camPitch) * camDist
+  );
+  camera.lookAt(0, 1.2, 0);
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>
